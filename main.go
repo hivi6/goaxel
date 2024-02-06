@@ -6,10 +6,15 @@ import (
   "os"
   "io"
   "strconv"
+  "time"
 )
 
 func main() {
-  url := "https://images.pexels.com/photos/104827/cat-pet-animal-domestic-104827.jpeg?cs=srgb&dl=pexels-pixabay-104827.jpg&fm=jpg&w=640&h=425"
+  if len(os.Args) <= 1 {
+    fmt.Println("Usage: goaxel <url>")
+    os.Exit(1)
+  }
+  url := os.Args[1]
 
   // create a client for the request
   client := &http.Client {}
@@ -17,7 +22,7 @@ func main() {
   // creating a request
   req, err := http.NewRequest("HEAD", url, nil)
   if err != nil {
-    fmt.Println(err)
+    fmt.Println(err.Error())
     fmt.Println("Error: Something went wrong while generating the HEAD request")
     os.Exit(1)
   }
@@ -26,7 +31,7 @@ func main() {
   // making the request and getting the response
   resp, err := client.Do(req)
   if err != nil {
-    fmt.Println(err)
+    fmt.Println(err.Error())
     fmt.Println("Error: Something went wrong while making the request")
     os.Exit(1)
   }
@@ -51,7 +56,7 @@ func main() {
   // Converting the Content-Length to Integer
   contentLength, err := strconv.Atoi(contentLengthStr)
   if err != nil {
-    fmt.Println(err)
+    fmt.Println(err.Error())
     fmt.Println("Error: Something went wrong while converting Content-Length to Integer")
     os.Exit(1)
   }
@@ -59,18 +64,18 @@ func main() {
   // Creating a GET request
   req, err = http.NewRequest("GET", url, nil)
   if err != nil {
-    fmt.Println(err)
+    fmt.Println(err.Error())
     fmt.Println("Error: Something went wrong while generating the GET request")
     os.Exit(1)
   }
   // add the range
-  req.Header.Add("Range", fmt.Sprintf("bytes=0-%v", contentLength - 10000))
+  req.Header.Add("Range", fmt.Sprintf("bytes=0-%v", contentLength))
   fmt.Println("method:", req.Method)
 
   // making the request and getting the response
   resp, err = client.Do(req)
   if err != nil {
-    fmt.Println(err)
+    fmt.Println(err.Error())
     fmt.Println("Error: Something went wrong while making the request")
     os.Exit(1)
   }
@@ -79,6 +84,25 @@ func main() {
 
   // create a file a read to that file
   file, _ := os.Create("temp.jpeg")
-  body, _ := io.ReadAll(resp.Body)
-  file.Write(body)
+  remainingLength := contentLength
+  startTime := time.Now()
+  fmt.Println("startTime:", startTime)
+  for remainingLength > 0 {
+    fmt.Printf("\r")
+    bufferSize := 10 * 1024
+    if remainingLength <= bufferSize {
+      bufferSize = remainingLength
+    }
+
+    buffer := make([]byte, bufferSize)
+    io.ReadFull(resp.Body, buffer)
+    file.Write(buffer)
+
+    remainingLength -= bufferSize
+    presentTime := time.Now()
+    diffTime := presentTime.Sub(startTime)
+    diffTimeSeconds := diffTime.Seconds()
+    fmt.Printf("speed: %vKBps   ", float64(contentLength - remainingLength) / diffTimeSeconds / 1024.0)
+  }
+  fmt.Println()
 }
