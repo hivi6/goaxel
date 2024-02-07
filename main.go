@@ -8,12 +8,17 @@ import (
   "strconv"
   "time"
   "errors"
+  "strings"
+  netUrl "net/url"
 )
 
 type DownloadInfo struct {
   Url string
+
   ContentLength uint64
   AcceptRanges bool
+
+  OutputFilename string
 }
 
 func CreateClient() (*http.Client, error) {
@@ -52,12 +57,48 @@ func FetchDownloadInfo(client *http.Client, url string) (*DownloadInfo, error) {
   }
   acceptRanges := (acceptRangesStr == "bytes")
 
+  // generating outputfilename
+  outputFilename := ""
+  // TODO: try to get filename from Content-Disposition
+  // for now generating filename using url
+  if outputFilename == "" {
+    parsedUrl, err := netUrl.Parse(url)
+    if err != nil {
+      return nil, errors.New("Something went wrong while parsing url")
+    }
+    if parsedUrl.Path != "" {
+      urlPathSplited := strings.Split(parsedUrl.Path, "/")
+      outputFilename = urlPathSplited[len(urlPathSplited) - 1]
+    }
+  }
+  if outputFilename == "" {
+    outputFilename = "default" // this is the default filename
+  }
+
+
   downloadInfo := DownloadInfo{
     Url: url,
     ContentLength: contentLength,
     AcceptRanges: acceptRanges,
+    OutputFilename: outputFilename,
   }
   return &downloadInfo, nil
+}
+
+func CreateFile(filename string) (string, *os.File, error) {
+  for i := 0; i < 1000; i++ { // should only try 1000 times
+    finalFilename := filename
+    if i != 0 { // generating filename using unixepoch
+      finalFilename = fmt.Sprintf("%v.%v", finalFilename, time.Now().Unix())
+    }
+    f, err := os.OpenFile(finalFilename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+    if err != nil {
+      continue
+    }
+    return finalFilename, f, nil; // was able to create the file
+  }
+
+  return "", nil, errors.New("Couldnot create file event after trying 1000 times, might add a output filename manually")
 }
 
 func main() {
@@ -103,8 +144,13 @@ func main() {
   fmt.Println("Response Content-Length:", resp.Header.Get("Content-Length"))
   defer resp.Body.Close()
 
-  // create a file a read to that file
-  file, _ := os.Create("temp.jpeg")
+  // create a file a write to that file
+  finalFilename, file, err := CreateFile(downloadInfo.OutputFilename)
+  if err != nil {
+    fmt.Println("Error:", err.Error())
+    os.Exit(1)
+  }
+  defer file.Close()
   remainingLength := downloadInfo.ContentLength
   startTime := time.Now()
   fmt.Println("startTime:", startTime)
@@ -125,4 +171,5 @@ func main() {
     fmt.Printf("\rspeed: %.2fKBps   ", float64(downloadInfo.ContentLength - remainingLength) / diffTimeSeconds / 1024.0)
   }
   fmt.Println()
+  fmt.Println("File", finalFilename, "created")
 }
