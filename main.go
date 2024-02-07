@@ -7,7 +7,58 @@ import (
   "io"
   "strconv"
   "time"
+  "errors"
 )
+
+type DownloadInfo struct {
+  Url string
+  ContentLength uint64
+  AcceptRanges bool
+}
+
+func CreateClient() (*http.Client, error) {
+  client := http.Client{}
+  return &client, nil
+}
+
+func FetchDownloadInfo(client *http.Client, url string) (*DownloadInfo, error) {
+  req, err := http.NewRequest("HEAD", url, nil)
+  if err != nil {
+    return nil, errors.New("Something went wrong while creating the HEAD request")
+  }
+
+  resp, err := client.Do(req)
+  if err != nil {
+    return nil, errors.New("Something went wrong while making the HEAD request")
+  }
+  defer resp.Body.Close()
+
+  contentLengthStr := resp.Header.Get("Content-Length")
+  if contentLengthStr == "" {
+    return nil, errors.New("No Content-Length was provided in the response by the server")
+  }
+  contentLength, err := strconv.ParseUint(contentLengthStr, 10, 64)
+  if err != nil {
+    return nil, errors.New("Something went wrong while parsing Content-Length to uint64")
+  }
+
+  acceptRangesStr := resp.Header.Get("Accept-Ranges")
+  if acceptRangesStr == "" {
+    return nil, errors.New("No Accept-Ranges was provided in the response by the server")
+  }
+  if acceptRangesStr != "none" && acceptRangesStr != "bytes" {
+    msg := fmt.Sprintf("Accept-Ranges of type '%s' not supported", acceptRangesStr)
+    return nil, errors.New(msg)
+  }
+  acceptRanges := (acceptRangesStr == "bytes")
+
+  downloadInfo := DownloadInfo{
+    Url: url,
+    ContentLength: contentLength,
+    AcceptRanges: acceptRanges,
+  }
+  return &downloadInfo, nil
+}
 
 func main() {
   if len(os.Args) <= 1 {
@@ -17,15 +68,28 @@ func main() {
   url := os.Args[1]
 
   // create a client for the request
-  client := &http.Client {}
-
-  // creating a request
-  req, err := http.NewRequest("HEAD", url, nil)
+  client, err := CreateClient()
   if err != nil {
-    fmt.Println(err.Error())
-    fmt.Println("Error: Something went wrong while generating the HEAD request")
+    fmt.Println("Error: Something went wrong while creating HTTP Client")
     os.Exit(1)
   }
+
+  // fetch download information
+  downloadInfo, err := FetchDownloadInfo(client, url)
+  if err != nil {
+    fmt.Println("Error:", err.Error())
+    os.Exit(1)
+  }
+
+  // Creating a GET request
+  req, err := http.NewRequest("GET", downloadInfo.Url, nil)
+  if err != nil {
+    fmt.Println(err.Error())
+    fmt.Println("Error: Something went wrong while generating the GET request")
+    os.Exit(1)
+  }
+  // add the range
+  req.Header.Add("Range", fmt.Sprintf("bytes=0-%v", downloadInfo.ContentLength - 1))
   fmt.Println("method:", req.Method)
 
   // making the request and getting the response
@@ -35,61 +99,17 @@ func main() {
     fmt.Println("Error: Something went wrong while making the request")
     os.Exit(1)
   }
-  fmt.Println("status code:", resp.StatusCode)
-
-  // checking if Accept-Ranges key is available
-  acceptRanges := resp.Header.Get("Accept-Ranges")
-  fmt.Println("Accept-Ranges:", acceptRanges)
-  if acceptRanges == "" || acceptRanges == "none" {
-    fmt.Println("Error: Server doesn't accepts ranges")
-    os.Exit(1)
-  }
-
-  // getting the Content-Length
-  contentLengthStr := resp.Header.Get("Content-Length")
-  fmt.Println("Content-Length:", contentLengthStr)
-  if contentLengthStr == "" {
-    fmt.Println("Error: Server didn't provide any contentLength")
-    os.Exit(1)
-  }
-
-  // Converting the Content-Length to Integer
-  contentLength, err := strconv.Atoi(contentLengthStr)
-  if err != nil {
-    fmt.Println(err.Error())
-    fmt.Println("Error: Something went wrong while converting Content-Length to Integer")
-    os.Exit(1)
-  }
-
-  // Creating a GET request
-  req, err = http.NewRequest("GET", url, nil)
-  if err != nil {
-    fmt.Println(err.Error())
-    fmt.Println("Error: Something went wrong while generating the GET request")
-    os.Exit(1)
-  }
-  // add the range
-  req.Header.Add("Range", fmt.Sprintf("bytes=0-%v", contentLength))
-  fmt.Println("method:", req.Method)
-
-  // making the request and getting the response
-  resp, err = client.Do(req)
-  if err != nil {
-    fmt.Println(err.Error())
-    fmt.Println("Error: Something went wrong while making the request")
-    os.Exit(1)
-  }
-  fmt.Println("status code:", resp.StatusCode)
+  fmt.Println("Response status-code:", resp.StatusCode)
+  fmt.Println("Response Content-Length:", resp.Header.Get("Content-Length"))
   defer resp.Body.Close()
 
   // create a file a read to that file
   file, _ := os.Create("temp.jpeg")
-  remainingLength := contentLength
+  remainingLength := downloadInfo.ContentLength
   startTime := time.Now()
   fmt.Println("startTime:", startTime)
   for remainingLength > 0 {
-    fmt.Printf("\r")
-    bufferSize := 10 * 1024
+    bufferSize := uint64(10 * 1024)
     if remainingLength <= bufferSize {
       bufferSize = remainingLength
     }
@@ -102,7 +122,7 @@ func main() {
     presentTime := time.Now()
     diffTime := presentTime.Sub(startTime)
     diffTimeSeconds := diffTime.Seconds()
-    fmt.Printf("speed: %vKBps   ", float64(contentLength - remainingLength) / diffTimeSeconds / 1024.0)
+    fmt.Printf("\rspeed: %.2fKBps   ", float64(downloadInfo.ContentLength - remainingLength) / diffTimeSeconds / 1024.0)
   }
   fmt.Println()
 }
