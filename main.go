@@ -83,7 +83,6 @@ func FetchDownloadInfo(url string) (*DownloadInfo, error) {
     outputFilename = "default" // this is the default filename
   }
 
-
   downloadInfo := DownloadInfo{
     Url: url,
     ContentLength: contentLength,
@@ -109,7 +108,7 @@ func CreateFile(filename string) (string, *os.File, error) {
   return "", nil, errors.New("Couldnot create file event after trying 1000 times, might add a output filename manually")
 }
 
-func DownloadRange(downloadInfo *DownloadInfo, filename string, start, stop uint64) {
+func DownloadRange(progress chan<- uint64, downloadInfo *DownloadInfo, filename string, start, stop uint64) {
   // create a client for the request
   client, err := CreateClient()
   if err != nil {
@@ -152,9 +151,10 @@ func DownloadRange(downloadInfo *DownloadInfo, filename string, start, stop uint
   }
 
   // start reading the body of the request and write it to the file
-  const BUFFER_SIZE = uint64(10 * 1024) // 10KB
+  const BUFFER_SIZE = uint64(8 * 1024) // 8KB
   contentLength := stop - start + 1
   buffer := make([]byte, BUFFER_SIZE)
+  workerProgress := uint64(0)
   for contentLength > 0 {
     readSize := BUFFER_SIZE
     if contentLength < BUFFER_SIZE {
@@ -165,6 +165,14 @@ func DownloadRange(downloadInfo *DownloadInfo, filename string, start, stop uint
     fd.Write(buffer[:readSize])
 
     contentLength -= readSize;
+    workerProgress += readSize
+
+    select {
+    case progress <- workerProgress:
+      workerProgress = 0
+    default:
+      continue
+    }
   }
 }
 
@@ -203,19 +211,58 @@ func main() {
     os.Exit(1)
   }
 
-  numberOfWorker := uint64(2)
-  var wg sync.WaitGroup
+  startTime := time.Now()
+  
+  progress := make(chan uint64)
+  var progressWg sync.WaitGroup
+  var workerWg sync.WaitGroup
+
+  progressWg.Add(1)
+  go func() {
+    defer progressWg.Done()
+    totalProgress := uint64(0)
+    lastSpeed := float64(0)
+    for {
+      workerProgress, ok := <-progress
+      if !ok {
+        fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", lastSpeed, 100.0)
+        break
+      }
+
+      currentTime := time.Now()
+      diffTime := currentTime.Sub(startTime)
+      diffMilli := diffTime.Milliseconds()
+
+      totalProgress += workerProgress
+      speed := float64(totalProgress) * 1000.0 / float64(diffMilli) / 1024.0
+      progressPercent := float64(totalProgress) * 100.0 / float64(downloadInfo.ContentLength)
+      
+      fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", speed, progressPercent)
+
+      lastSpeed = speed
+    }
+  }()
+
+  numberOfWorker := uint64(4)
   for i := uint64(0); i < numberOfWorker; i++ {
     start := i * (downloadInfo.ContentLength / numberOfWorker)
     stop := start + (downloadInfo.ContentLength / numberOfWorker) - 1;
     if i == numberOfWorker - 1 {
       stop = downloadInfo.ContentLength - 1;
     }
-    wg.Add(1)
+    workerWg.Add(1)
     go func(start, stop uint64) {
-      defer wg.Done()
-      DownloadRange(downloadInfo, finalFilename, start, stop)
+      defer workerWg.Done()
+      DownloadRange(progress, downloadInfo, finalFilename, start, stop)
     }(start, stop)
   }
-  wg.Wait()
+
+  workerWg.Wait()
+  close(progress)
+  progressWg.Wait()
+
+  currentTime := time.Now()
+  diffTime := currentTime.Sub(startTime)
+  diffSeconds := diffTime.Seconds()
+  fmt.Printf("\n\nElapsed-Time: %.2fs\n", diffSeconds)
 }
