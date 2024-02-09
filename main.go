@@ -10,6 +10,7 @@ import (
   "errors"
   "strings"
   netUrl "net/url"
+  "sync"
 )
 
 type DownloadInfo struct {
@@ -26,7 +27,14 @@ func CreateClient() (*http.Client, error) {
   return &client, nil
 }
 
-func FetchDownloadInfo(client *http.Client, url string) (*DownloadInfo, error) {
+func FetchDownloadInfo(url string) (*DownloadInfo, error) {
+  // create a client for the request
+  client, err := CreateClient()
+  if err != nil {
+    fmt.Println("Error: Something went wrong while creating HTTP Client")
+    os.Exit(1)
+  }
+
   req, err := http.NewRequest("HEAD", url, nil)
   if err != nil {
     return nil, errors.New("Something went wrong while creating the HEAD request")
@@ -101,24 +109,11 @@ func CreateFile(filename string) (string, *os.File, error) {
   return "", nil, errors.New("Couldnot create file event after trying 1000 times, might add a output filename manually")
 }
 
-func main() {
-  if len(os.Args) <= 1 {
-    fmt.Println("Usage: goaxel <url>")
-    os.Exit(1)
-  }
-  url := os.Args[1]
-
+func DownloadRange(downloadInfo *DownloadInfo, filename string, start, stop uint64) {
   // create a client for the request
   client, err := CreateClient()
   if err != nil {
     fmt.Println("Error: Something went wrong while creating HTTP Client")
-    os.Exit(1)
-  }
-
-  // fetch download information
-  downloadInfo, err := FetchDownloadInfo(client, url)
-  if err != nil {
-    fmt.Println("Error:", err.Error())
     os.Exit(1)
   }
 
@@ -130,8 +125,8 @@ func main() {
     os.Exit(1)
   }
   // add the range
-  req.Header.Add("Range", fmt.Sprintf("bytes=0-%v", downloadInfo.ContentLength - 1))
-  fmt.Println("method:", req.Method)
+  bytesRange := fmt.Sprintf("bytes=%v-%v", start, stop)
+  req.Header.Add("Range", bytesRange)
 
   // making the request and getting the response
   resp, err := client.Do(req)
@@ -140,9 +135,52 @@ func main() {
     fmt.Println("Error: Something went wrong while making the request")
     os.Exit(1)
   }
-  fmt.Println("Response status-code:", resp.StatusCode)
-  fmt.Println("Response Content-Length:", resp.Header.Get("Content-Length"))
   defer resp.Body.Close()
+
+  // opening the file and going to the specific start point
+  fd, err := os.OpenFile(filename, os.O_RDWR, 0666)
+  if err != nil {
+    fmt.Println(err.Error())
+    fmt.Println("Error: Something went wrong while opening file")
+    os.Exit(1)
+  }
+  _, err = fd.Seek(int64(start), 0)
+  if err != nil {
+    fmt.Println(err.Error())
+    fmt.Println("Error: Something went wrong while going to start position of the file")
+    os.Exit(1)
+  }
+
+  // start reading the body of the request and write it to the file
+  const BUFFER_SIZE = uint64(10 * 1024) // 10KB
+  contentLength := stop - start + 1
+  buffer := make([]byte, BUFFER_SIZE)
+  for contentLength > 0 {
+    readSize := BUFFER_SIZE
+    if contentLength < BUFFER_SIZE {
+      readSize = contentLength
+    }
+
+    io.ReadFull(resp.Body, buffer[:readSize])
+    fd.Write(buffer[:readSize])
+
+    contentLength -= readSize;
+  }
+}
+
+func main() {
+  if len(os.Args) <= 1 {
+    fmt.Println("Usage: goaxel <url>")
+    os.Exit(1)
+  }
+  url := os.Args[1]
+
+  // fetch download information
+  downloadInfo, err := FetchDownloadInfo(url)
+  if err != nil {
+    fmt.Println("Error:", err.Error())
+    os.Exit(1)
+  }
 
   // create a file a write to that file
   finalFilename, file, err := CreateFile(downloadInfo.OutputFilename)
@@ -151,25 +189,33 @@ func main() {
     os.Exit(1)
   }
   defer file.Close()
-  remainingLength := downloadInfo.ContentLength
-  startTime := time.Now()
-  fmt.Println("startTime:", startTime)
-  for remainingLength > 0 {
-    bufferSize := uint64(10 * 1024)
-    if remainingLength <= bufferSize {
-      bufferSize = remainingLength
-    }
-
-    buffer := make([]byte, bufferSize)
-    io.ReadFull(resp.Body, buffer)
-    file.Write(buffer)
-
-    remainingLength -= bufferSize
-    presentTime := time.Now()
-    diffTime := presentTime.Sub(startTime)
-    diffTimeSeconds := diffTime.Seconds()
-    fmt.Printf("\rspeed: %.2fKBps   ", float64(downloadInfo.ContentLength - remainingLength) / diffTimeSeconds / 1024.0)
+  // create a file with size as the contentLength
+  _, err = file.Seek(int64(downloadInfo.ContentLength - 1), 0)
+  if err != nil {
+    fmt.Println(err.Error())
+    fmt.Println("Couldnot create file with given size")
+    os.Exit(1)
   }
-  fmt.Println()
-  fmt.Println("File", finalFilename, "created")
+  _, err = file.Write([]byte{0})
+  if err != nil {
+    fmt.Println(err.Error())
+    fmt.Println("Couldnot create file with given size")
+    os.Exit(1)
+  }
+
+  numberOfWorker := uint64(2)
+  var wg sync.WaitGroup
+  for i := uint64(0); i < numberOfWorker; i++ {
+    start := i * (downloadInfo.ContentLength / numberOfWorker)
+    stop := start + (downloadInfo.ContentLength / numberOfWorker) - 1;
+    if i == numberOfWorker - 1 {
+      stop = downloadInfo.ContentLength - 1;
+    }
+    wg.Add(1)
+    go func(start, stop uint64) {
+      defer wg.Done()
+      DownloadRange(downloadInfo, finalFilename, start, stop)
+    }(start, stop)
+  }
+  wg.Wait()
 }
