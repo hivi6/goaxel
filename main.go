@@ -11,6 +11,12 @@ import (
   "strings"
   netUrl "net/url"
   "sync"
+  "flag"
+)
+
+var (
+  BUFFER_SIZE uint64
+  N_CONNECTIONS uint64
 )
 
 type DownloadInfo struct {
@@ -151,13 +157,13 @@ func DownloadRange(progress chan<- uint64, downloadInfo *DownloadInfo, filename 
   }
 
   // start reading the body of the request and write it to the file
-  const BUFFER_SIZE = uint64(8 * 1024) // 8KB
+  var buffer_size = uint64(BUFFER_SIZE * 1024) // 8KB
   contentLength := stop - start + 1
-  buffer := make([]byte, BUFFER_SIZE)
+  buffer := make([]byte, buffer_size)
   workerProgress := uint64(0)
   for contentLength > 0 {
-    readSize := BUFFER_SIZE
-    if contentLength < BUFFER_SIZE {
+    readSize := buffer_size
+    if contentLength < buffer_size {
       readSize = contentLength
     }
 
@@ -177,11 +183,21 @@ func DownloadRange(progress chan<- uint64, downloadInfo *DownloadInfo, filename 
 }
 
 func main() {
-  if len(os.Args) <= 1 {
+  // parse commandline arguments
+  flag.Uint64Var(&BUFFER_SIZE, "buffer_size", 8, "buffer size per connections")
+  flag.Uint64Var(&N_CONNECTIONS, "connections", 4, "number of connections")
+  flag.Parse()
+  tail := flag.Args()
+  if len(tail) != 1 {
     fmt.Println("Usage: goaxel <url>")
     os.Exit(1)
   }
-  url := os.Args[1]
+  url := tail[0]
+
+  // listing information
+  fmt.Printf("url: %v\n", url)
+  fmt.Printf("buffer_size: %vKB\n", BUFFER_SIZE)
+  fmt.Printf("number of connection: %v\n", N_CONNECTIONS)
 
   // fetch download information
   downloadInfo, err := FetchDownloadInfo(url)
@@ -222,10 +238,14 @@ func main() {
     defer progressWg.Done()
     totalProgress := uint64(0)
     lastSpeed := float64(0)
+    
+    printProgress := func(speed float64, progress float64) {
+      fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", speed, progress)
+    }
+
     for {
       workerProgress, ok := <-progress
       if !ok {
-        fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", lastSpeed, 100.0)
         break
       }
 
@@ -236,14 +256,15 @@ func main() {
       totalProgress += workerProgress
       speed := float64(totalProgress) * 1000.0 / float64(diffMilli) / 1024.0
       progressPercent := float64(totalProgress) * 100.0 / float64(downloadInfo.ContentLength)
-      
-      fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", speed, progressPercent)
+     
+      printProgress(speed, progressPercent)
 
       lastSpeed = speed
     }
+    printProgress(lastSpeed, 100.0)
   }()
 
-  numberOfWorker := uint64(4)
+  numberOfWorker := uint64(N_CONNECTIONS)
   for i := uint64(0); i < numberOfWorker; i++ {
     start := i * (downloadInfo.ContentLength / numberOfWorker)
     stop := start + (downloadInfo.ContentLength / numberOfWorker) - 1;
