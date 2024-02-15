@@ -51,32 +51,7 @@ func Download(conn uint64, buffer_size uint64, url string) {
 	progressWg.Add(1)
 	go func() {
 		defer progressWg.Done()
-		totalProgress := uint64(0)
-		lastSpeed := float64(0)
-
-		printProgress := func(speed float64, progress float64) {
-			fmt.Printf("\rspeed: %8.2fKBps progress: %6.2f%%", speed, progress)
-		}
-
-		for {
-			workerProgress, ok := <-progress
-			if !ok {
-				break
-			}
-
-			currentTime := time.Now()
-			diffTime := currentTime.Sub(startTime)
-			diffMilli := diffTime.Milliseconds()
-
-			totalProgress += workerProgress
-			speed := float64(totalProgress) * 1000.0 / float64(diffMilli) / 1024.0
-			progressPercent := float64(totalProgress) * 100.0 / float64(downloadInfo.ContentLength)
-
-			printProgress(speed, progressPercent)
-
-			lastSpeed = speed
-		}
-		printProgress(lastSpeed, 100.0)
+		printProgress(progress, downloadInfo.ContentLength)
 	}()
 
 	numberOfWorker := conn

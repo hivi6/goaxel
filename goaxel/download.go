@@ -149,4 +149,7 @@ func DownloadRange(progress chan<- uint64, downloadInfo DownloadInfo, filename s
 			continue
 		}
 	}
+	if workerProgress > 0 {
+		progress <- workerProgress
+	}
 }
