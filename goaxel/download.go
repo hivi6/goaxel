@@ -84,7 +84,7 @@ func FetchDownloadInfo(url string) (DownloadInfo, error) {
 	return downloadInfo, nil
 }
 
-func DownloadRange(progress chan<- uint64, downloadInfo DownloadInfo, filename string, buffer_size, start, stop uint64) {
+func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo DownloadInfo, filename string, buffer_size, start, stop uint64) {
 	// create a client for the request
 	client, err := CreateClient()
 	if err != nil {
@@ -143,14 +143,11 @@ func DownloadRange(progress chan<- uint64, downloadInfo DownloadInfo, filename s
 		contentLength -= readSize
 		workerProgress += readSize
 
-		select {
-		case progress <- workerProgress:
-			workerProgress = 0
-		default:
-			continue
+		progress <- ProgressInfo{
+			workerId: workerId,
+			start:    start,
+			stop:     stop,
+			current:  start + workerProgress,
 		}
-	}
-	if workerProgress > 0 {
-		progress <- workerProgress
 	}
 }

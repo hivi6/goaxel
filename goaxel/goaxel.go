@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 )
 
 func Download(conn uint64, buffer_size uint64, url string) {
@@ -22,36 +21,19 @@ func Download(conn uint64, buffer_size uint64, url string) {
 	fmt.Printf("Content Size: %vB\n", downloadInfo.ContentLength)
 
 	// create a file a write to that file
-	finalFilename, file, err := CreateFile(downloadInfo.Filename)
-	if err != nil {
+	if err := CreateContentFile(downloadInfo.Filename, downloadInfo.ContentLength); err != nil {
 		fmt.Println("Error:", err.Error())
 		os.Exit(1)
 	}
-	defer file.Close()
-	// create a file with size as the contentLength
-	_, err = file.Seek(int64(downloadInfo.ContentLength-1), 0)
-	if err != nil {
-		fmt.Println(err.Error())
-		fmt.Println("Couldnot create file with given size")
-		os.Exit(1)
-	}
-	_, err = file.Write([]byte{0})
-	if err != nil {
-		fmt.Println(err.Error())
-		fmt.Println("Couldnot create file with given size")
-		os.Exit(1)
-	}
 
-	startTime := time.Now()
-
-	progress := make(chan uint64)
+	progress := make(chan ProgressInfo, conn*4)
 	var progressWg sync.WaitGroup
 	var workerWg sync.WaitGroup
 
 	progressWg.Add(1)
 	go func() {
 		defer progressWg.Done()
-		printProgress(progress, downloadInfo.ContentLength)
+		printProgress(progress, conn, downloadInfo.ContentLength)
 	}()
 
 	numberOfWorker := conn
@@ -62,18 +44,13 @@ func Download(conn uint64, buffer_size uint64, url string) {
 			stop = downloadInfo.ContentLength - 1
 		}
 		workerWg.Add(1)
-		go func(start, stop uint64) {
+		go func(workerId, start, stop uint64) {
 			defer workerWg.Done()
-			DownloadRange(progress, downloadInfo, finalFilename, buffer_size, start, stop)
-		}(start, stop)
+			DownloadRange(workerId, progress, downloadInfo, downloadInfo.Filename, buffer_size, start, stop)
+		}(i, start, stop)
 	}
 
 	workerWg.Wait()
 	close(progress)
 	progressWg.Wait()
-
-	currentTime := time.Now()
-	diffTime := currentTime.Sub(startTime)
-	diffSeconds := diffTime.Seconds()
-	fmt.Printf("\n\nElapsed-Time: %.2fs\n", diffSeconds)
 }
