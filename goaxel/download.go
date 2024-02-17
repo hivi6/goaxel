@@ -143,11 +143,23 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 		contentLength -= readSize
 		workerProgress += readSize
 
-		progress <- ProgressInfo{
+		// non blocking sending progress
+		select {
+		case progress <- ProgressInfo{
 			workerId: workerId,
 			start:    start,
 			stop:     stop,
 			current:  start + workerProgress,
+		}:
+		default:
 		}
+	}
+
+	// blocking sending progress
+	progress <- ProgressInfo{
+		workerId: workerId,
+		start:    start,
+		stop:     stop,
+		current:  start + workerProgress,
 	}
 }

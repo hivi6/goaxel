@@ -3,6 +3,7 @@ package goaxel
 import (
 	"fmt"
 	"math"
+	"os"
 	"time"
 )
 
@@ -13,24 +14,35 @@ type ProgressInfo struct {
 	current  uint64
 }
 
-func printProgress(progress <-chan ProgressInfo, connections, totalContentBytes uint64) {
-	progressBytes := uint64(0)
+func printProgress(progress <-chan ProgressInfo, metadataFilename string) {
 	startTime := time.Now().UnixMilli()
 	speedUnits := []string{"B/s ", "KB/s", "MB/s", "GB/s", "TB/s"}
-	workerProgresses := make([]ProgressInfo, connections)
+
+	metadata, err := ReadMetadata(metadataFilename)
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
+
+	totalContentBytes := uint64(0)
+	previouslyDone := uint64(0)
+	for _, rang := range metadata.ranges {
+		totalContentBytes += rang.stop - rang.start + 1
+		previouslyDone += rang.current - rang.start
+	}
 
 	for workerProgress, ok := <-progress; ok; workerProgress, ok = <-progress {
-		workerProgresses[workerProgress.workerId] = workerProgress
+		metadata.ranges[workerProgress.workerId] = MetadataRange{workerProgress.start, workerProgress.stop, workerProgress.current}
 
-		progressBytes = 0
-		for _, workerProgress := range workerProgresses {
+		progressBytes := uint64(0)
+		for _, workerProgress := range metadata.ranges {
 			progressBytes += workerProgress.current - workerProgress.start
 		}
 
 		currentTime := time.Now().UnixMilli()
 		duration := float64(currentTime-startTime) / 1000.0 // Seconds
 
-		progressPercent := float64(progressBytes) * 100.0 / float64(totalContentBytes)
+		progressPercent := float64(previouslyDone+progressBytes) * 100.0 / float64(totalContentBytes)
 
 		speed := float64(progressBytes) / duration
 		speedUnit := speedUnits[0]
@@ -48,6 +60,11 @@ func printProgress(progress <-chan ProgressInfo, connections, totalContentBytes 
 		}
 
 		fmt.Printf("\rprogress: %6.2f%% speed: %7.2f%v", progressPercent, speed, speedUnit)
+
+		if err := WriteMetadata(metadataFilename, metadata); err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
 	}
 
 	currentTime := time.Now().UnixMilli()

@@ -3,6 +3,7 @@ package goaxel
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -20,6 +21,52 @@ func Download(conn uint64, buffer_size uint64, url string) {
 	fmt.Printf("Final Url: %v\n", downloadInfo.Url)
 	fmt.Printf("Content Size: %vB\n", downloadInfo.ContentLength)
 
+	// check if metadata file exists
+	metadataFilename := ""
+	metadata := NewMetadata(conn)
+	listDirectories, err := os.ReadDir("./")
+	if err != nil {
+		fmt.Println("Error: Couldnot list the current directory to check goaxel metadata file")
+		os.Exit(1)
+	}
+	for _, entry := range listDirectories {
+		if entry.Type().IsRegular() &&
+			strings.HasPrefix(entry.Name(), downloadInfo.Filename) &&
+			strings.HasSuffix(entry.Name(), ".gst") {
+			metadataFilename = entry.Name()
+			break
+		}
+	}
+
+	if metadataFilename == "" {
+		// create metadata file
+		fmt.Println("No Metadata file found")
+		for i := uint64(0); i < conn; i++ {
+			metadata.ranges[i].start = i * (downloadInfo.ContentLength / conn)
+			metadata.ranges[i].current = metadata.ranges[i].start
+			metadata.ranges[i].stop = metadata.ranges[i].start + (downloadInfo.ContentLength / conn) - 1
+			if i == conn-1 {
+				metadata.ranges[i].stop = downloadInfo.ContentLength - 1
+			}
+		}
+		metadataFilename = downloadInfo.Filename + ".gst"
+		if err := CreateMetadata(metadataFilename); err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+		if err := WriteMetadata(metadataFilename, metadata); err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+	} else { // if metadata already exists
+		fmt.Println("Metadata file found")
+		metadata, err = ReadMetadata(metadataFilename)
+		if err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+	}
+
 	// create a file a write to that file
 	if err := CreateContentFile(downloadInfo.Filename, downloadInfo.ContentLength); err != nil {
 		fmt.Println("Error:", err.Error())
@@ -33,24 +80,24 @@ func Download(conn uint64, buffer_size uint64, url string) {
 	progressWg.Add(1)
 	go func() {
 		defer progressWg.Done()
-		printProgress(progress, conn, downloadInfo.ContentLength)
+		printProgress(progress, metadataFilename)
 	}()
 
-	numberOfWorker := conn
-	for i := uint64(0); i < numberOfWorker; i++ {
-		start := i * (downloadInfo.ContentLength / numberOfWorker)
-		stop := start + (downloadInfo.ContentLength / numberOfWorker) - 1
-		if i == numberOfWorker-1 {
-			stop = downloadInfo.ContentLength - 1
-		}
+	for i := uint64(0); i < conn; i++ {
 		workerWg.Add(1)
 		go func(workerId, start, stop uint64) {
 			defer workerWg.Done()
 			DownloadRange(workerId, progress, downloadInfo, downloadInfo.Filename, buffer_size, start, stop)
-		}(i, start, stop)
+		}(i, metadata.ranges[i].current, metadata.ranges[i].stop)
 	}
 
 	workerWg.Wait()
 	close(progress)
 	progressWg.Wait()
+
+	// destroy Metadata file
+	if err := DestroyMetadata(metadataFilename); err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
 }
