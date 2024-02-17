@@ -128,6 +128,7 @@ func DownloadRange(progress chan<- uint64, downloadInfo DownloadInfo, filename s
 
 	// start reading the body of the request and write it to the file
 	contentLength := stop - start + 1
+	buffer_size = buffer_size * 1024 // in KB
 	buffer := make([]byte, buffer_size)
 	workerProgress := uint64(0)
 	for contentLength > 0 {
