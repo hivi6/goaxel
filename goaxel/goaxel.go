@@ -58,6 +58,11 @@ func Download(conn uint64, buffer_size uint64, url string) {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
+		// create a file a write to that file
+		if err := CreateContentFile(downloadInfo.Filename, downloadInfo.ContentLength); err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
 	} else { // if metadata already exists
 		fmt.Println("Metadata file found")
 		metadata, err = ReadMetadata(metadataFilename)
@@ -65,12 +70,6 @@ func Download(conn uint64, buffer_size uint64, url string) {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
-	}
-
-	// create a file a write to that file
-	if err := CreateContentFile(downloadInfo.Filename, downloadInfo.ContentLength); err != nil {
-		fmt.Println("Error:", err.Error())
-		os.Exit(1)
 	}
 
 	progress := make(chan ProgressInfo, conn*4)
