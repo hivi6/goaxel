@@ -84,7 +84,7 @@ func FetchDownloadInfo(url string) (DownloadInfo, error) {
 	return downloadInfo, nil
 }
 
-func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo DownloadInfo, filename string, buffer_size, start, stop uint64) {
+func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo DownloadInfo, filename string, buffer_size, start, stop, current uint64) {
 	// create a client for the request
 	client, err := CreateClient()
 	if err != nil {
@@ -100,7 +100,7 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 		os.Exit(1)
 	}
 	// add the range
-	bytesRange := fmt.Sprintf("bytes=%v-%v", start, stop)
+	bytesRange := fmt.Sprintf("bytes=%v-%v", current, stop)
 	req.Header.Add("Range", bytesRange)
 
 	// making the request and getting the response
@@ -119,7 +119,7 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 		fmt.Println("Error: Something went wrong while opening file")
 		os.Exit(1)
 	}
-	_, err = fd.Seek(int64(start), 0)
+	_, err = fd.Seek(int64(current), 0)
 	if err != nil {
 		fmt.Println(err.Error())
 		fmt.Println("Error: Something went wrong while going to start position of the file")
@@ -127,7 +127,7 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 	}
 
 	// start reading the body of the request and write it to the file
-	contentLength := stop - start + 1
+	contentLength := stop - current + 1
 	buffer_size = buffer_size * 1024 // in KB
 	buffer := make([]byte, buffer_size)
 	workerProgress := uint64(0)
@@ -149,7 +149,7 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 			workerId: workerId,
 			start:    start,
 			stop:     stop,
-			current:  start + workerProgress,
+			current:  current + workerProgress,
 		}:
 		default:
 		}
@@ -160,6 +160,6 @@ func DownloadRange(workerId uint64, progress chan<- ProgressInfo, downloadInfo D
 		workerId: workerId,
 		start:    start,
 		stop:     stop,
-		current:  start + workerProgress,
+		current:  current + workerProgress,
 	}
 }

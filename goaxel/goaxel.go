@@ -85,10 +85,10 @@ func Download(conn uint64, buffer_size uint64, url string) {
 
 	for i := uint64(0); i < conn; i++ {
 		workerWg.Add(1)
-		go func(workerId, start, stop uint64) {
+		go func(workerId, start, stop, current uint64) {
 			defer workerWg.Done()
-			DownloadRange(workerId, progress, downloadInfo, downloadInfo.Filename, buffer_size, start, stop)
-		}(i, metadata.ranges[i].current, metadata.ranges[i].stop)
+			DownloadRange(workerId, progress, downloadInfo, downloadInfo.Filename, buffer_size, start, stop, current)
+		}(i, metadata.ranges[i].start, metadata.ranges[i].stop, metadata.ranges[i].current)
 	}
 
 	workerWg.Wait()

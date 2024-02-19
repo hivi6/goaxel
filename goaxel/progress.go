@@ -25,26 +25,26 @@ func printProgress(progress <-chan ProgressInfo, metadataFilename string) {
 	}
 
 	totalContentBytes := uint64(0)
-	previouslyDone := uint64(0)
 	for _, rang := range metadata.ranges {
 		totalContentBytes += rang.stop - rang.start + 1
-		previouslyDone += rang.current - rang.start
 	}
 
+	currentProgressBytes := uint64(0)
 	for workerProgress, ok := <-progress; ok; workerProgress, ok = <-progress {
+		currentProgressBytes += workerProgress.current - metadata.ranges[workerProgress.workerId].current
 		metadata.ranges[workerProgress.workerId] = MetadataRange{workerProgress.start, workerProgress.stop, workerProgress.current}
 
-		progressBytes := uint64(0)
-		for _, workerProgress := range metadata.ranges {
-			progressBytes += workerProgress.current - workerProgress.start
+		totalProgressBytes := uint64(0)
+		for _, rang := range metadata.ranges {
+			totalProgressBytes += rang.current - rang.start
 		}
 
 		currentTime := time.Now().UnixMilli()
 		duration := float64(currentTime-startTime) / 1000.0 // Seconds
 
-		progressPercent := float64(previouslyDone+progressBytes) * 100.0 / float64(totalContentBytes)
+		progressPercent := float64(totalProgressBytes) * 100.0 / float64(totalContentBytes)
 
-		speed := float64(progressBytes) / duration
+		speed := float64(currentProgressBytes) / duration
 		speedUnit := speedUnits[0]
 		for i := 1; i < len(speedUnits); i++ {
 			if speed > 1024 {
