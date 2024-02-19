@@ -25,26 +25,23 @@ func printProgress(progress <-chan ProgressInfo, metadataFilename string) {
 	}
 
 	totalContentBytes := uint64(0)
+	totalProgressBytes := uint64(0)
+	currentProgressBytes := uint64(0)
 	for _, rang := range metadata.ranges {
 		totalContentBytes += rang.stop - rang.start + 1
+		totalProgressBytes += rang.current - rang.start
 	}
 
-	currentProgressBytes := uint64(0)
 	for workerProgress, ok := <-progress; ok; workerProgress, ok = <-progress {
-		currentProgressBytes += workerProgress.current - metadata.ranges[workerProgress.workerId].current
-		metadata.ranges[workerProgress.workerId] = MetadataRange{workerProgress.start, workerProgress.stop, workerProgress.current}
-
-		totalProgressBytes := uint64(0)
-		for _, rang := range metadata.ranges {
-			totalProgressBytes += rang.current - rang.start
-		}
-
 		currentTime := time.Now().UnixMilli()
 		duration := float64(currentTime-startTime) / 1000.0 // Seconds
 
+		currentProgressBytes += workerProgress.current - metadata.ranges[workerProgress.workerId].current
+		totalProgressBytes += workerProgress.current - metadata.ranges[workerProgress.workerId].current
 		progressPercent := float64(totalProgressBytes) * 100.0 / float64(totalContentBytes)
-
 		speed := float64(currentProgressBytes) / duration
+		remainingTime := float64(totalContentBytes-totalProgressBytes) / speed
+
 		speedUnit := speedUnits[0]
 		for i := 1; i < len(speedUnits); i++ {
 			if speed > 1024 {
@@ -59,8 +56,9 @@ func printProgress(progress <-chan ProgressInfo, metadataFilename string) {
 			speedUnit = "fast"
 		}
 
-		fmt.Printf("\rprogress: %6.2f%% speed: %7.2f%v", progressPercent, speed, speedUnit)
+		fmt.Printf("\rprogress: %6.2f%% | speed: %7.2f%v | remaining: %8.2fs", progressPercent, speed, speedUnit, remainingTime)
 
+		metadata.ranges[workerProgress.workerId] = MetadataRange{workerProgress.start, workerProgress.stop, workerProgress.current}
 		if err := WriteMetadata(metadataFilename, metadata); err != nil {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
