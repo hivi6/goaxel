@@ -1,6 +1,6 @@
 # goaxel
 
-Axel but in go. A download accelarator very poorly written.
+Axel but in go. A download accelarator written very poorly.
 
 ## install
 
