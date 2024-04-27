@@ -17,4 +17,5 @@ use `--help` for more details
 ## Todo
 
 - [x] Multi-Threaded downloads
+- [ ] Handle websites with no Accept-Range
 - [ ] Handle Redirects
