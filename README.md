@@ -9,7 +9,7 @@ Just run `make` and you should be able to get a `bin` folder with `goaxel` as a 
 ## usage
 
 ```sh
-goaxel [-buffer_size number] [-connections number] url
+goaxel [--buffer_size number] [--connections number] url
 ```
 
 use `--help` for more details
