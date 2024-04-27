@@ -15,6 +15,10 @@ func Download(conn uint64, buffer_size uint64, url string) {
 		os.Exit(1)
 	}
 
+	if !downloadInfo.AcceptRanges {
+		conn = 1
+	}
+
 	fmt.Printf("Provided Url: %v\n", url)
 	fmt.Printf("Number of Connection: %v\n", conn)
 	fmt.Printf("Buffer Size: %vKB\n", buffer_size)

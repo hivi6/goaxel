@@ -48,14 +48,13 @@ func FetchDownloadInfo(url string) (DownloadInfo, error) {
 	}
 
 	acceptRangesStr := resp.Header.Get("Accept-Ranges")
+	acceptRanges := (acceptRangesStr == "bytes")
 	if acceptRangesStr == "" {
-		return DownloadInfo{}, errors.New("no Accept-Ranges was provided in the response by the server")
-	}
-	if acceptRangesStr != "none" && acceptRangesStr != "bytes" {
+		acceptRanges = false
+	} else if acceptRangesStr != "none" && acceptRangesStr != "bytes" {
 		msg := fmt.Sprintf("Accept-Ranges of type '%s' not supported", acceptRangesStr)
 		return DownloadInfo{}, errors.New(msg)
 	}
-	acceptRanges := (acceptRangesStr == "bytes")
 
 	// generating outputfilename
 	outputFilename := ""
